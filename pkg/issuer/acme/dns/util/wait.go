@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/golang/glog"
@@ -17,7 +18,9 @@ var (
 	// PreCheckDNS checks DNS propagation before notifying ACME that
 	// the DNS challenge is ready.
 	PreCheckDNS preCheckDNSFunc = checkDNSPropagation
-	fqdnToZone                  = map[string]string{}
+
+	fqdnToZoneLock sync.RWMutex
+	fqdnToZone     = map[string]string{}
 )
 
 const defaultResolvConf = "/etc/resolv.conf"
@@ -168,10 +171,13 @@ func lookupNameservers(fqdn string) ([]string, error) {
 // FindZoneByFqdn determines the zone apex for the given fqdn by recursing up the
 // domain labels until the nameserver returns a SOA record in the answer section.
 func FindZoneByFqdn(fqdn string, nameservers []string) (string, error) {
+	fqdnToZoneLock.RLock()
 	// Do we have it cached?
 	if zone, ok := fqdnToZone[fqdn]; ok {
+		fqdnToZoneLock.RUnlock()
 		return zone, nil
 	}
+	fqdnToZoneLock.RUnlock()
 
 	labelIndexes := dns.Split(fqdn)
 	for _, index := range labelIndexes {
@@ -196,6 +202,9 @@ func FindZoneByFqdn(fqdn string, nameservers []string) (string, error) {
 		if in.Rcode == dns.RcodeSuccess {
 			for _, ans := range in.Answer {
 				if soa, ok := ans.(*dns.SOA); ok {
+					fqdnToZoneLock.Lock()
+					defer fqdnToZoneLock.Unlock()
+
 					zone := soa.Hdr.Name
 					fqdnToZone[fqdn] = zone
 					return zone, nil
@@ -215,10 +224,6 @@ func isTLD(domain string) bool {
 	return false
 }
 
-// ClearFqdnCache clears the cache of fqdn to zone mappings. Primarily used in testing.
-func ClearFqdnCache() {
-	fqdnToZone = map[string]string{}
-}
 
 // ToFqdn converts the name into a fqdn appending a trailing dot.
 func ToFqdn(name string) string {
