@@ -81,7 +81,7 @@ func Run(opts *options.ControllerOptions, stopCh <-chan struct{}) {
 				defer wg.Done()
 				glog.Infof("Starting %s controller", n)
 
-				workers := 5
+				workers := 10
 				err := fn(workers, stopCh)
 
 				if err != nil {
